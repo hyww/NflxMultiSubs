@@ -14,12 +14,43 @@ const hookJsonParseAndAddCallback = function(_window) {
       if (result && result.result && result.result.movieId) {
           const movieId = result.result.movieId
           //console.log(`Intercepted manifest ${movieId}`);
-          window.__NflxMultiSubs.updateManifest(result.result);
+          // clone manifest so we can modify it w/o breaking our manifest updating logic
+          let clonedManifest = _parse.call(JSON, ...args).result;
+          window.__NflxMultiSubs.updateManifest(clonedManifest);
+          if (gRenderOptions.secondaryLanguageMode === 'last') {
+            if (result.result.timedtexttracks.find(t=>t.rank==0).language === gRenderOptions.secondaryLanguageLastUsed) {
+              result.result.recommendedMedia.timedTextTrackId = result.result.timedtexttracks.find(t=>t.rank==1).new_track_id;
+              console.log("Restored recommended primary subtitle");
+            }
+          }
       }
       return result;
   };
 };
 hookJsonParseAndAddCallback(window);
+
+
+// Hook JSON.stringify() to intercept and modify manifest requests
+const hookJsonStringify = function(_window) {
+  const _stringify = JSON.stringify;
+  _window.JSON.stringify = (...args) => {
+    if (args[0] && (args[0].url === 'licensedManifest' || args[0].url === 'manifest')) {
+      // key name is different for different cadium-playercore versions (e.g. 'Fb' for 6.0033.414.911, 'Db' for 6.0038.181.911, 'zb' for 6.0034.588.911)
+      // so we check each one by testing two common properties
+      for (let i in args[0]) {
+        if (args[0][i] && args[0][i].viewableId && args[0][i].manifestVersion) {
+          if (gRenderOptions.secondaryLanguageMode === 'last') {
+            args[0][i].preferredTextLocale =  gRenderOptions.secondaryLanguageLastUsed;
+            console.log('Modified request to get last sub language', gRenderOptions.secondaryLanguageLastUsed);
+          }
+        }
+      }
+    }
+    const result = _stringify.call(JSON, ...args);
+    return result;
+  };
+};
+hookJsonStringify(window);
 
 
 // hook `history.pushState()` as there is not "pushstate" event in DOM API
