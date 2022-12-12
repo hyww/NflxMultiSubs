@@ -213,6 +213,35 @@ class DehydratedSubtitle extends SubtitleBase {
 
   activate() {
     this.active = true;
+
+    try {
+      const primarySubtitleMenu = gSubtitleMenu.elem.previousSibling,
+        originalPrimary = primarySubtitleMenu.querySelector('li[data-uia^="subtitle-item-selected"]'),
+        tempPrimary = primarySubtitleMenu.querySelector(`li[data-uia="subtitle-item-${this.lang}"]`);
+      // set this language as primary subtitle temporarily to get manifest with download urls
+      tempPrimary.click();
+      console.log(`Triggered manifest request for ${this.lang} by changing primary subtitle`);
+
+      let loaded = false;
+      const selected = /^subtitle-item-selected/;
+      // reset back to original primary subtitle after loaded
+      const reset = () => {
+        if (loaded) {
+          if (selected.test(originalPrimary.dataset.uia)) {
+            console.log(`Primary subtitle resetted`);
+            return;
+          }
+          originalPrimary.click();
+        } else if (selected.test(tempPrimary.dataset.uia)) {
+          loaded = true;
+        }
+        setTimeout(reset, 100);
+      }
+      reset();
+    } catch (err) {
+      this.active = false;
+      console.warn('Error: ,', err);
+    }
     return Promise.resolve();
   }
 }
@@ -518,10 +547,13 @@ const buildSubtitleList = textTracks => {
 const updateSubtitleList = (textTracks, textTrackId) => {
   const track = textTracks.find(t => t.new_track_id == textTrackId),
     sub = SubtitleFactory.build(track),
-    index = gSubtitles.findIndex(s => s.lang == sub.lang);
+    index = gSubtitles.findIndex(s => s.lang == sub.lang),
+    active = gSubtitles[index].active;
   if (gSubtitles[index] instanceof DehydratedSubtitle && sub !== null) {
     gSubtitles[index] = sub;
-    gSubtitleMenu && gSubtitleMenu.render();
+    if (active) {
+      activateSubtitle(index);
+    }
   }
 };
 
@@ -567,7 +599,6 @@ class SubtitleMenu {
 
     const listElem = document.createElement('ul');
     gSubtitles.forEach((sub, id) => {
-      if (sub instanceof DehydratedSubtitle) return;
       let item = document.createElement('li');
       item.classList.add(this.style.li);
       if (sub.active) {
