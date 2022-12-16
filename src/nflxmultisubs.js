@@ -62,6 +62,7 @@ let gVideoRatio = 1080 / 1920;
 let gRenderOptions = Object.assign({}, kDefaultSettings);
 let gSecondaryOffset = 0; // used to move secondary subs if primary subs overflow the screen edge
 let gResetPrimary = null;
+let gRecommended = null;
 
 (() => {
   // connect with background script immediately so we can capture settings before playback (used for language mode)
@@ -196,8 +197,8 @@ class SubtitleBase {
 }
 
 class DummySubtitle extends SubtitleBase {
-  constructor() {
-    super('Off');
+  constructor(lang) {
+    super(lang);
   }
 
   activate() {
@@ -442,7 +443,7 @@ class SubtitleFactory {
   static build(track) {
     const isImageBased = Object.values(track.ttDownloadables).some(d => d.isImage);
     const isCaption = track.rawTrackType === 'closedcaptions';
-    const lang = track.languageDescription + (isCaption ? ' [CC]' : '');
+    const lang = track.languageDescription + (isCaption ? ' (CC)' : '');
     const bcp47 = track.language;
 
     if (!track.hydrated) {
@@ -517,7 +518,8 @@ class SubtitleFactory {
 
 // textTracks: manifest.textTracks
 const buildSubtitleList = textTracks => {
-  const dummy = new DummySubtitle();
+  const offDescription = textTracks.find(t=>t.rank == -1).languageDescription,
+    dummy = new DummySubtitle(offDescription);
   dummy.activate();
 
   // sorted by language in alphabetical order (to align with official UI)
@@ -525,7 +527,7 @@ const buildSubtitleList = textTracks => {
     .filter(t => !SubtitleFactory.isNoneTrack(t))
     .map(t => SubtitleFactory.build(t))
     .filter(t => t !== null);
-  return subs.concat(dummy);
+  return [dummy].concat(subs);
 };
 
 // textTracks: manifest.textTracks
@@ -562,16 +564,18 @@ class SubtitleMenu {
   extractStyle(node){
     // get class names of all the sub menu elements
     // so we can apply them to our menu and copy their style
-    let style = { maindiv: null, subdiv: null, h3: null, ul: null, li: null, selected: null }
+    let style = { maindiv: null, subdiv: null, selectedSubdiv: null, h3: null, ul: null, li: null, selected: null, recommendedSeparatorDiv: null }
     const mainNode = node.querySelector(`div[data-uia=${SUB_MENU_SELECTOR}]`)
 
     //some ugly try blocks because we don't want to crash if only one extraction fails
     try { style.maindiv = mainNode.firstChild.className } catch {}
-    try { style.subdiv = mainNode.querySelector('li div div').className } catch {}
+    try { style.selectedSubdiv = mainNode.querySelector('li[data-uia*="selected"] div div').className } catch {}
+    try { style.subdiv = mainNode.querySelector(`li div div:not(.${style.selectedSubdiv})`).className } catch {}
     try { style.h3 = mainNode.querySelector('h3').className } catch {}
     try { style.ul = mainNode.querySelector('ul').className } catch {}
     try { style.li = mainNode.querySelector('li').className } catch {}
     try { style.selected = mainNode.querySelector('li[data-uia*="selected"] svg').className.baseVal } catch {} // Netflix fuckery
+    try { style.recommendedSeparatorDiv = mainNode.querySelector('li ~ div').className } catch {}
 
     return style
   }
@@ -594,7 +598,7 @@ class SubtitleMenu {
       if (sub.active) {
         const icon = sub.state === 'LOADING' ? loadingIcon : checkIcon;
         item.classList.add('selected');
-        item.innerHTML = `<div>${icon}<div class="${this.style.subdiv}">${sub.lang}</div></div>`;
+        item.innerHTML = `<div>${icon}<div class="${this.style.selectedSubdiv}">${sub.lang}</div></div>`;
       } else {
         item.innerHTML = `<div><div class="${this.style.subdiv}">${sub.lang}</div></div>`;
         item.addEventListener('click', () => {
@@ -603,12 +607,13 @@ class SubtitleMenu {
       }
       listElem.classList.add(this.style.ul);
       listElem.appendChild(item);
+      if (id === gRecommended) {
+        let div = document.createElement('div');
+        div.classList.add(this.style.recommendedSeparatorDiv);
+        listElem.appendChild(div);
+      }
     });
-    const listWrapper = document.createElement('div');
-    listWrapper.style.overflowY = 'auto';
-    listWrapper.style.overflowX = 'hidden';
-    listWrapper.appendChild(listElem);
-    this.elem.appendChild(listWrapper);
+    this.elem.appendChild(listElem);
   }
 }
 
@@ -1309,6 +1314,7 @@ class NflxMultiSubsManager {
 
           // For cadmium-playercore-6.0012.183.041.js and later
           gSubtitles = buildSubtitleList(manifest.timedtexttracks);
+          gRecommended = manifest.maxRecommendedTextRank;
           //gSubtitleMenu = new SubtitleMenu();
           //gSubtitleMenu.render();
 
