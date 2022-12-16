@@ -61,6 +61,7 @@ let gMsgPort, gRendererLoop;
 let gVideoRatio = 1080 / 1920;
 let gRenderOptions = Object.assign({}, kDefaultSettings);
 let gSecondaryOffset = 0; // used to move secondary subs if primary subs overflow the screen edge
+let gResetPrimary = null;
 
 (() => {
   // connect with background script immediately so we can capture settings before playback (used for language mode)
@@ -221,23 +222,7 @@ class DehydratedSubtitle extends SubtitleBase {
       // set this language as primary subtitle temporarily to get manifest with download urls
       tempPrimary.click();
       console.log(`Triggered manifest request for ${this.lang} by changing primary subtitle`);
-
-      let loaded = false;
-      const selected = /^subtitle-item-selected/;
-      // reset back to original primary subtitle after loaded
-      const reset = () => {
-        if (loaded) {
-          if (selected.test(originalPrimary.dataset.uia)) {
-            console.log(`Primary subtitle resetted`);
-            return;
-          }
-          originalPrimary.click();
-        } else if (selected.test(tempPrimary.dataset.uia)) {
-          loaded = true;
-        }
-        setTimeout(reset, 100);
-      }
-      reset();
+      if (!gResetPrimary) gResetPrimary = Object.entries(originalPrimary).find(a=>/^__reactEventHandlers\$/.test(a[0]))[1].onClick;
     } catch (err) {
       this.active = false;
       console.warn('Error: ,', err);
@@ -552,6 +537,11 @@ const updateSubtitleList = (textTracks, textTrackId) => {
   if (gSubtitles[index] instanceof DehydratedSubtitle && sub !== null) {
     gSubtitles[index] = sub;
     if (active) {
+      if (gResetPrimary) {
+        gResetPrimary();
+        gResetPrimary = null;
+        console.log(`Primary subtitle resetted`);
+      }
       activateSubtitle(index);
     }
   }
